@@ -40,7 +40,8 @@ public class CDCSerialDevice extends UsbSerialDevice
     private static final int CDC_CONTROL_LINE_ON = 0x0003;
     private static final int CDC_CONTROL_LINE_OFF = 0x0000;
 
-    private UsbInterface mInterface;
+    private UsbInterface mDataInterface;
+    private int mCommInterfaceIndex;
     private UsbEndpoint inEndpoint;
     private UsbEndpoint outEndpoint;
     private UsbRequest requestIN;
@@ -53,7 +54,8 @@ public class CDCSerialDevice extends UsbSerialDevice
     public CDCSerialDevice(UsbDevice device, UsbDeviceConnection connection, int iface)
     {
         super(device, connection);
-        mInterface = device.getInterface(iface >= 0 ? iface : findFirstCDC(device));
+        mDataInterface = device.getInterface(iface >= 0 ? iface : findFirstCDCData(device));
+        mCommInterfaceIndex = findFirstCDCComm(device);        
     }
 
     @Override
@@ -89,7 +91,7 @@ public class CDCSerialDevice extends UsbSerialDevice
         setControlCommand(CDC_SET_CONTROL_LINE_STATE, CDC_CONTROL_LINE_OFF, null);
         killWorkingThread();
         killWriteThread();
-        connection.releaseInterface(mInterface);
+        connection.releaseInterface(mDataInterface);
         connection.close();
     }
 
@@ -112,7 +114,7 @@ public class CDCSerialDevice extends UsbSerialDevice
     public void syncClose()
     {
         setControlCommand(CDC_SET_CONTROL_LINE_STATE, CDC_CONTROL_LINE_OFF, null);
-        connection.releaseInterface(mInterface);
+        connection.releaseInterface(mDataInterface);
         connection.close();
     }
 
@@ -264,21 +266,21 @@ public class CDCSerialDevice extends UsbSerialDevice
     }
 
     private boolean openCDC()
-    {
-        if(connection.claimInterface(mInterface, true))
+    {        
+        if(connection.claimInterface(mDataInterface, true))
         {
-            Log.i(CLASS_ID, "Interface succesfully claimed");
+            Log.i(CLASS_ID, "Data Interface succesfully claimed");
         }else
         {
-            Log.i(CLASS_ID, "Interface could not be claimed");
+            Log.i(CLASS_ID, "Data Interface could not be claimed");
             return false;
         }
-
+        
         // Assign endpoints
-        int numberEndpoints = mInterface.getEndpointCount();
+        int numberEndpoints = mDataInterface.getEndpointCount();
         for(int i=0;i<=numberEndpoints-1;i++)
         {
-            UsbEndpoint endpoint = mInterface.getEndpoint(i);
+            UsbEndpoint endpoint = mDataInterface.getEndpoint(i);
             if(endpoint.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK
                     && endpoint.getDirection() == UsbConstants.USB_DIR_IN)
             {
@@ -310,7 +312,7 @@ public class CDCSerialDevice extends UsbSerialDevice
         {
             dataLength = data.length;
         }
-        int response = connection.controlTransfer(CDC_REQTYPE_HOST2DEVICE, request, value, 0, data, dataLength, USB_TIMEOUT);
+        int response = connection.controlTransfer(CDC_REQTYPE_HOST2DEVICE, request, value, mCommInterfaceIndex, data, dataLength, USB_TIMEOUT);
         Log.i(CLASS_ID,"Control Transfer Response: " + String.valueOf(response));
         return response;
     }
@@ -318,12 +320,12 @@ public class CDCSerialDevice extends UsbSerialDevice
     private byte[] getLineCoding()
     {
         byte[] data = new byte[7];
-        int response = connection.controlTransfer(CDC_REQTYPE_DEVICE2HOST, CDC_GET_LINE_CODING, 0, 0, data, data.length, USB_TIMEOUT);
+        int response = connection.controlTransfer(CDC_REQTYPE_DEVICE2HOST, CDC_GET_LINE_CODING, 0, mCommInterfaceIndex, data, data.length, USB_TIMEOUT);
         Log.i(CLASS_ID,"Control Transfer Response: " + String.valueOf(response));
         return data;
     }
 
-    private static int findFirstCDC(UsbDevice device)
+    private static int findFirstCDCData(UsbDevice device)
     {
         int interfaceCount = device.getInterfaceCount();
 
@@ -335,8 +337,25 @@ public class CDCSerialDevice extends UsbSerialDevice
             }
         }
 
-        Log.i(CLASS_ID, "There is no CDC class interface");
+        Log.i(CLASS_ID, "There is no CDC data class interface");
+        return -1;
+    }
+    
+    private static int findFirstCDCComm(UsbDevice device)
+    {
+        int interfaceCount = device.getInterfaceCount();
+
+        for (int iIndex = 0; iIndex < interfaceCount; ++iIndex)
+        {
+            if (device.getInterface(iIndex).getInterfaceClass() == UsbConstants.USB_CLASS_COMM)
+            {
+                return iIndex;
+            }
+        }
+
+        Log.i(CLASS_ID, "There is no comm class interface");
         return -1;
     }
 
 }
+
